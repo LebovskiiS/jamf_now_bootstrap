@@ -1,194 +1,214 @@
-macOS MDM Bootstrap (Manual, Jamf-compatible)
+Jamf Now Local Bootstrap (Manual Onboarding)
 
-This repo provides a manual/local bootstrap for macOS endpoints that installs your .mobileconfig baselines and (optionally) an Open Enrollment profile (e.g., Jamf Now link). It also applies baseline hardening and can notify Slack.
+This repo provides a manual, user-initiated bootstrap for macOS devices using Jamf Now Open Enrollment.
+It installs the Jamf enrollment profile (if you provide an Open Enrollment URL) and applies a local security baseline via .mobileconfig profiles. It also enables core hardening (firewall, Gatekeeper, password policy, FileVault defer) and writes clear logs.
 
-This version is designed for manual, on-device installation (not zero-touch).
-For an automated variant, see: https://github.com/LebovskiiS/jamf_pro_bootstrap
+If you need fully automated enrollment (DEP/ABM + Jamf Pro, zero-touch), use the separate project:
+https://github.com/LebovskiiS/jamf_pro_bootstrap
 
-Fork/copy it, or rename .env_example → .env and set your values. Optional integrations: Slack and Vault 🔒🛡️
+What this is / isn’t
 
-Supported OS / Baselines
+This is:
 
-Sequoia (macOS 15.x) → mofileconfigs/macos/sequoia
+A local bootstrap you can run on a Mac to enroll via Jamf Now Open Enrollment and apply a baseline.
 
-Sonoma (macOS 14.x) → mofileconfigs/macos/sonoma
+OS-aware: detects macOS 13/14/15 and picks the matching baseline folder.
 
-Ventura (macOS 13.x) → mofileconfigs/macos/ventura
+Extensible via hooks (pre/post baseline, and on unenroll).
 
-If your device runs an earlier macOS, please upgrade to one of these (preferably the latest).
+Safe logging and state tracking for clean uninstall.
 
-Each baseline directory should contain your exported .mobileconfig files (e.g., from Jamf’s Compliance Editor).
-Use numeric prefixes to control install order, for example:
+This is not:
 
-01-passwords.mobileconfig
-02-filevault.mobileconfig
-03-firewall.mobileconfig
+Jamf Pro/DEP zero-touch automation.
 
-Repository Layout
+A replacement for centrally managed policies/profiles in Jamf. It’s a “first mile” bootstrap.
+
+Repository layout
 .
-├─ bootstrap.sh                 # main bootstrap (reads .env and/or flags)
-├─ uninstall.sh                 # rollback (removes profiles installed by bootstrap)
-├─ quickstart.sh                # interactive launcher (prompts -> writes .env -> runs bootstrap)
-├─ .env_example                 # environment template to copy to .env
+├─ bootstrap.sh              # main bootstrap (macOS only)
+├─ uninstall.sh              # removes applied profiles; attempts MDM unenroll profile removal
+├─ quickstart.sh             # interactive wrapper: detects OS, writes .env, runs bootstrap
+├─ .env_example              # sample env file you copy to .env and edit
 ├─ hooks/
-│  └─ postbaseline.d/
-│     └─ 10-edr.sh.example     # optional post-baseline hook (e.g., install EDR/VPN/pkg)
-└─ mobileconfigs/
+│  ├─ prebaseline.d/         # scripts run BEFORE baseline profile install (optional)
+│  ├─ postbaseline.d/        # scripts run AFTER baseline profile install (optional)
+│  └─ unenroll.d/            # scripts run during uninstall/unenroll (optional)
+└─ mofileconfigs/
    └─ macos/
-      ├─ sequoia/
-      │  ├─ 01-passwords.mobileconfig
-      │  ├─ 02-filevault.mobileconfig
-      │  └─ 03-firewall.mobileconfig
-      ├─ sonoma/
-      └─ ventura/
+      ├─ sequoia/            # macOS 15 profiles (*.mobileconfig)
+      ├─ sonoma/             # macOS 14 profiles (*.mobileconfig)
+      └─ ventura/            # macOS 13 profiles (*.mobileconfig)
+
+
+If your device runs older macOS than 13 (Ventura), please upgrade to one of these three (ideally the latest).
 
 Requirements
 
-macOS (13/14/15) with built-ins: profiles, curl, spctl, fdesetup, softwareupdate, systemsetup
+A Mac running macOS 13/14/15.
 
-sudo privileges (the scripts will re-exec with sudo if needed)
+(Optional) Jamf Now Open Enrollment link (e.g. https://go.jamfnow.com/XXXXX).
+Open Enrollment will prompt the user for name and code during profile install. The script cannot bypass this.
 
-On modern macOS, installing configuration profiles may require user approval in System Settings → Profiles (Apple platform behavior).
+Local admin rights (the scripts use sudo).
 
-Quick Start (Interactive)
+(Optional) Slack Incoming Webhook URL for success notification.
 
-Place your .mobileconfig files under the matching baseline:
+Quick start (recommended)
 
-mofileconfigs/macos/sequoia/ (macOS 15)
+Put your .mobileconfig profiles into the appropriate OS folder under mofileconfigs/macos/{sequoia|sonoma|ventura}/.
 
-mofileconfigs/macos/sonoma/ (macOS 14)
+Copy .env_example to .env if you want, or just use the interactive prompts.
 
-mofileconfigs/macos/ventura/ (macOS 13)
-
-Run the launcher:
+Run:
 
 chmod +x quickstart.sh bootstrap.sh uninstall.sh
 ./quickstart.sh
 
 
-What happens:
+The helper will:
 
-Detects your macOS and proposes the correct baseline (sequoia/sonoma/ventura)
+Detect your macOS version and suggest the matching baseline folder.
 
-Prompts for the Open Enrollment URL (Jamf Now “go.jamfnow.com/…”, optional)
+Prompt for Open Enrollment URL (optional).
 
-Prompts for Slack webhook (optional)
+Prompt for Slack webhook (optional).
 
-Writes a .env with your choices
+Write/update .env.
 
-Runs bootstrap.sh with the chosen baseline
+Execute bootstrap.sh with the right arguments.
 
-Quick Start (Manual)
+Logs are written to /var/log/mdm-onboard.log.
+State of installed profile files is tracked at /var/lib/mdm-bootstrap/installed_profiles.txt.
 
-Prefer to set values yourself?
+Manual usage
 
-cp .env_example .env
-# Edit .env (set ENROLL_PROFILE_URL, BASELINE_DIR, SLACK_WEBHOOK_URL)
+You can run the bootstrap directly:
 
 sudo ./bootstrap.sh \
-  --baseline-dir mofileconfigs/macos/sonoma \
-  --enroll-url "https://go.jamfnow.com/XXXXX"
+  --enroll-url "https://go.jamfnow.com/XXXXX" \
+  --baseline-dir "mofileconfigs/macos/sequoia"
 
 
-Environment variables read by bootstrap.sh:
+Or use environment variables (the script also reads .env if present):
 
-ENROLL_PROFILE_URL="https://go.jamfnow.com/XXXXX"  # optional Open Enrollment URL
-BASELINE_DIR="mofileconfigs/macos/sequoia"         # or sonoma/ventura
-SLACK_WEBHOOK_URL=""                                # optional Slack notifications
+ENROLL_PROFILE_URL="https://go.jamfnow.com/XXXXX" \
+BASELINE_DIR="mofileconfigs/macos/sonoma" \
+sudo -E ./bootstrap.sh
 
 
-Jamf Now Open Enrollment URLs may present a UI asking for org name/code; that step is handled by Apple’s UI after the profile is installed.
+Variables
 
-What the Bootstrap Does
+ENROLL_PROFILE_URL — Jamf Now Open Enrollment link (optional).
 
-Detects macOS version and selects/uses the baseline directory.
+BASELINE_DIR — path to the folder containing your .mobileconfig baseline.
 
-Optional: downloads and installs the enrollment .mobileconfig from your Open Enrollment URL.
+SLACK_WEBHOOK_URL — optional Slack Incoming Webhook for a success notice.
 
-Installs each .mobileconfig found in the baseline directory (alphabetical order).
+What the bootstrap does
 
-Enables Firewall, Gatekeeper, system updates, and NTP.
+Verifies macOS and chooses a baseline directory (Sequoia/Sonoma/Ventura).
 
-Logs everything to /var/log/mdm-onboard.log.
-Tracks installed profile paths in /var/lib/mdm-bootstrap/installed_profiles.txt (used by uninstall.sh to derive identifiers).
+Installs the MDM enrollment .mobileconfig (if ENROLL_PROFILE_URL provided).
+Jamf Now may prompt for name/code during installation.
 
-Sends a Slack success message if SLACK_WEBHOOK_URL is set.
+Installs all .mobileconfig files in your chosen baseline directory.
 
-Uninstall / Rollback
+Enables:
+
+Application Firewall (socketfilterfw --setglobalstate on)
+
+Gatekeeper (spctl --master-enable)
+
+Local password policy (pwpolicy) — min length 12, mixed case, number, symbol
+
+FileVault deferral (fdesetup enable -defer) if not already enabled
+
+Logs actions and prints installed profile identifiers.
+
+Optionally sends a Slack success message (if SLACK_WEBHOOK_URL is set).
+
+Hooks
+
+You can drop your own scripts to extend behavior. The bootstrap will run them if present:
+
+hooks/prebaseline.d/*.sh — run before installing baseline profiles.
+Example use: ensure Rosetta, install CLI dependencies, preflight checks.
+
+hooks/postbaseline.d/*.sh — run after installing baseline profiles.
+Example use: “assert” that a setting took effect, notify Slack, start agents.
+
+hooks/unenroll.d/*.sh — run during uninstall.sh.
+Example use: stop agents, revoke local certificates, wipe temp artifacts.
+
+Make scripts executable:
+
+chmod +x hooks/prebaseline.d/*.sh hooks/postbaseline.d/*.sh hooks/unenroll.d/*.sh
+
+
+You’ll find commented examples in the repo; copy them without the .example suffix, adjust, and make executable.
+
+Uninstall / clean up
 sudo ./uninstall.sh
 
 
-Reads /var/lib/mdm-bootstrap/installed_profiles.txt (created by the bootstrap)
+This will:
 
-Resolves each profile’s PayloadIdentifier and removes it
+Remove the configuration profiles that bootstrap.sh applied (using tracked state).
 
-Attempts to remove the enrollment profile where allowed by the OS
+Attempt to remove the MDM enrollment profile (only if the OS allows it).
 
-Logs & Troubleshooting
+Run any hooks/unenroll.d/*.sh scripts you’ve provided.
 
-Main log: /var/log/mdm-onboard.log
+Logging and state
 
-Installed profile paths list: /var/lib/mdm-bootstrap/installed_profiles.txt
+Log file: /var/log/mdm-onboard.log
 
-List installed profiles:
+State directory: /var/lib/mdm-bootstrap/
 
-/usr/bin/profiles list -type configuration
+installed_profiles.txt holds the list of applied profile file paths to allow clean removal.
 
+Secrets and configuration
 
-Common checks:
+.env: put your local values in .env (never commit secrets).
+A .env_example is included to copy:
 
-Ensure .mobileconfig files exist in the chosen baseline directory.
-
-If the enrollment profile requires user approval, complete that in System Settings → Profiles.
-
-If FileVault deferral warns about SecureToken, log in with a SecureToken admin and enable FileVault.
-
-Optional Integrations
-Slack
-
-Set SLACK_WEBHOOK_URL in .env (or provide it via quickstart.sh). The bootstrap will post a simple success message when onboarding completes. 🔒🛡️
-
-HashiCorp Vault (optional)
-
-If you don’t want secrets in .env, use a wrapper or a hooks/postbaseline.d/* script to fetch secrets from Vault at runtime and export them as env variables for the bootstrap. 🔒
-
-.gitignore
-
-Recommended entries:
-
-# local secrets and logs
-.env
-*.log
-/var/log/mdm-onboard.log
-
-# macOS detritus
-.DS_Store
-
-# editor/IDE
-.idea/
-.vscode/
+cp .env_example .env
+# then edit .env
 
 
-Commit .env_example only. Do not commit real secrets. 🔒
+Slack: provide SLACK_WEBHOOK_URL if you want a success notification.
+
+You can integrate a secrets manager (e.g., Vault) later; this manual bootstrap ships with simple .env configuration to keep the setup straightforward.
 
 Limitations
 
-This project does not create or manage an MDM server; it installs local profiles and (optionally) your enrollment profile.
+Jamf Now Open Enrollment requires user interaction (name/code) inside the profile install dialog; this is expected.
 
-Profile installs/removals may require user approval depending on macOS version and device state.
+This bootstrap focuses on macOS. Windows/Linux flows are out of scope here.
 
-Advanced controls (PPPC, system extension approvals, FV escrow) are best managed by your MDM server.
+For truly zero-touch, move to Jamf Pro/DEP and use the dedicated project:
+https://github.com/LebovskiiS/jamf_pro_bootstrap
 
 FAQ
 
-Do I need Python or extra dependencies?
-No, everything is pure Bash using macOS built-ins.
+Where do I get the Open Enrollment URL?
+From your Jamf Now Open Enrollment page (e.g., https://go.jamfnow.com/XXXXX). That link downloads a .mobileconfig. The script automates downloading and installing it, but Jamf may still prompt for user attributes (name/code).
 
-Can I pin a specific baseline?
-Yes: run with --baseline-dir mofileconfigs/macos/<sequoia|sonoma|ventura> or set BASELINE_DIR in .env.
+Do I need to change anything for different macOS versions?
+No. quickstart.sh detects 13/14/15 and points bootstrap.sh to the matching baseline folder under mofileconfigs/macos/.
 
-Can I deploy EDR/VPN silently?
-Yes. Add a signed installer step in hooks/postbaseline.d/ (see 10-edr.sh.example) and handle approvals via your profiles/MDM.
+Can I add EDR/VPN/agent setup?
+Yes, put that logic into hooks/postbaseline.d/*.sh so it runs after baseline profiles are applied.
 
-Where do I get the enrollment URL?
-From your Jamf Now Open Enrollment page (e.g., https://go.jamfnow.com/XXXXX). Paste that into quickstart.sh or .env.
+Where can I see what happened?
+Read /var/log/mdm-onboard.log. The last lines include the list of installed profile identifiers.
+
+Contributing
+
+Keep .mobileconfig profiles under the correct OS folder:
+mofileconfigs/macos/{sequoia|sonoma|ventura}/
+
+Avoid committing real secrets; use .env_example as a template.
+
+Prefer adding custom behaviors via hooks, not by forking the core scripts.
