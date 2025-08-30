@@ -36,7 +36,7 @@ It installs the Jamf enrollment profile (if you provide an Open Enrollment URL) 
 │  ├─ prebaseline.d/         # scripts run BEFORE baseline profile install (optional)
 │  ├─ postbaseline.d/        # scripts run AFTER baseline profile install (optional)
 │  └─ unenroll.d/            # scripts run during uninstall/unenroll (optional)
-└─ mofileconfigs/
+└─ mobileconfigs/
    └─ macos/
       ├─ sequoia/            # macOS 15 profiles (*.mobileconfig)
       ├─ sonoma/             # macOS 14 profiles (*.mobileconfig)
