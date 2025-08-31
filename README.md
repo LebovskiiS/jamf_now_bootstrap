@@ -180,7 +180,7 @@ sudo ./uninstall.sh
 
 ## Screenshot
 
-If your repo contains a `static/result.png`, GitHub will render it below. This is handy to signal a successful dry‑run or to show expected output:
+RESULT
 
 ![Bootstrap result](./static/result.png)
 
