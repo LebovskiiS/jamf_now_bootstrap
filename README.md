@@ -1,37 +1,36 @@
-# Jamf Now skript (manual onboard)
+# Jamf Now Bootstrap (Manual Onboarding)
 
-Eto repo delayet **ruchnoy start** dlya macOS mashin cherez **Jamf Now Open Enrollment**.
-On stavit enroll profil (esli ty das ssylku) i prilipaet local security baseline cherez `.mobileconfig`. Tuda zhe vklyucheno: firewall, gatekeeper, policy na parol, FileVault defer i logi pishutsya.
+This repo provides a **manual, user‑initiated** bootstrap for macOS devices using **Jamf Now Open Enrollment**. It installs the Jamf enrollment profile (if you provide an Open Enrollment URL or a local profile file) and applies a local security baseline via `.mobileconfig` profiles. It also enables core hardening (firewall, Gatekeeper, password policy, FileVault defer) and writes clear logs.
 
-> Hocesh avtomat DEP/ABM + Jamf Pro, smotri drugoy proekt:
+> Need fully automated zero‑touch (DEP/ABM + Jamf Pro)? Use the separate project:
 > **[jamf\_pro\_bootstrap](https://github.com/LebovskiiS/jamf_pro_bootstrap)**
 
 ---
 
-## Chto eto / ne eto
+## What this is / isn’t
 
-**Eto:**
+**This is:**
 
-* Ruchnoy start na Mac dlya enroll v Jamf Now Open Enrollment i baseline.
-* Znaet macOS versiyu 13/14/15 i beret pravilnyy folder.
-* Mojet rasshirit’sya hookami (pre/post/unenroll).
-* Est logi i tracking state chtoby snimat chestno.
+* A local bootstrap you run on a Mac to enroll via Jamf **Now** Open Enrollment and apply a baseline.
+* OS‑aware: detects macOS 13/14/15 and selects the matching baseline folder.
+* Extensible via hooks (pre/post baseline, and on unenroll).
+* With logs and simple state tracking for honest rollbacks.
 
-**Ne eto:**
+**This is not:**
 
-* Ne zero-touch avtomat DEP.
-* Ne zamena central policy v Jamf. Eto tolko pervyy shag.
+* Zero‑touch DEP automation.
+* A replacement for centralized Jamf policy. It’s a first step.
 
 ---
 
-## Layout repo
+## Repository layout
 
 ```
 .
-├─ bootstrap.sh      # glavnoy skript
-├─ uninstall.sh      # snimaet profili, proba unenroll
-├─ quickstart.sh     # wrapper, sam znaet OS, pishi .env
-├─ .env_example      # primer env file
+├─ bootstrap.sh      # main bootstrap script
+├─ uninstall.sh      # removes profiles, attempts unenroll
+├─ quickstart.sh     # wrapper; auto detects OS; writes .env
+├─ .env_example      # example env file
 ├─ hooks/
 │  ├─ prebaseline.d/
 │  ├─ postbaseline.d/
@@ -43,16 +42,16 @@ On stavit enroll profil (esli ty das ssylku) i prilipaet local security baseline
       └─ ventura/   # macOS 13
 ```
 
-> Starshe macOS 13 ne podderzhivaetsya — nado obnova.
+> Older than macOS 13 is **not** supported — please upgrade.
 
 ---
 
-## Trebovaniya
+## Requirements
 
-* Mac s macOS 13/14/15.
-* (optional) Jamf Now Open Enrollment link (`https://go.jamfnow.com/XXXXX`).
-* Admin prava (sudo).
-* (optional) Slack webhook dlya notif.
+* A Mac running macOS 13/14/15.
+* (Optional) Jamf Now Open Enrollment link (`https://go.jamfnow.com/XXXXX`).
+* Admin rights (sudo).
+* (Optional) Slack webhook for notifications.
 
 ---
 
@@ -61,23 +60,39 @@ On stavit enroll profil (esli ty das ssylku) i prilipaet local security baseline
 ```bash
 git clone git@github.com:LebovskiiS/jamf_now_bootstrap.git
 cd jamf_now_bootstrap
+
+# Make scripts executable
 chmod +x quickstart.sh bootstrap.sh uninstall.sh
+find hooks -name "*.sh" -exec chmod +x {} \;
+
+# Kick off the installer
 ./quickstart.sh
 ```
 
-Helper:
+**Important:** All scripts must be executable. If you hit permission errors, run:
 
-* sam naidet macOS versiyu
-* sprosit enrollment URL
-* sprosit Slack
-* zapishet v `.env`
-* zapustit bootstrap
+```bash
+chmod +x *.sh
+find hooks -name "*.sh" -exec chmod +x {} \;
+```
 
-Logi v **/var/log/mdm-onboard.log**
+**The helper will:**
+
+* Auto‑detect macOS version.
+* Ask for the enrollment profile **URL** or a **local file path**.
+* Ask for Slack webhook (optional).
+* Write your choices to `.env`.
+* Launch the bootstrap.
+
+Logs are written to **`/var/log/mdm-onboard.log`**.
 
 ---
 
-## Env vars
+## Supplying the enrollment profile (two options)
+
+You can provide the Jamf Now enrollment profile in one of two ways:
+
+### Option A — Open Enrollment **URL**
 
 ```bash
 ENROLL_PROFILE_URL="https://go.jamfnow.com/XXXXX" \
@@ -85,33 +100,45 @@ BASELINE_DIR="mobileconfigs/macos/sonoma" \
 sudo -E ./bootstrap.sh
 ```
 
-* `ENROLL_PROFILE_URL` — enrollment link
-* `BASELINE_DIR` — folder s mobileconfig
-* `SLACK_WEBHOOK_URL` — optional Slack
+### Option B — Local **.mobileconfig** file
+
+If your tenant shows a landing page instead of a direct `.mobileconfig` download, first download the profile from Jamf Now, then point the script at the local file:
+
+```bash
+ENROLL_PROFILE_FILE="/path/to/jamf-now.mobileconfig" \
+BASELINE_DIR="mobileconfigs/macos/sonoma" \
+sudo -E ./bootstrap.sh
+```
+
+> If both `ENROLL_PROFILE_URL` and `ENROLL_PROFILE_FILE` are set, the **local file takes precedence**.
+
+### Installing baseline configs only (no Jamf Now)
+
+If you only want to apply the local security baseline (without enrolling), omit the enrollment variables and just provide `BASELINE_DIR`. The script will skip the enrollment step and install the baseline profiles.
 
 ---
 
-## Chto delayet bootstrap
+## What the bootstrap does
 
-* Proverka macOS i vibor baseline.
-* Stavit MDM enroll profil (esli URL est’).
-* Stavit vse baseline `.mobileconfig`.
-* Uzhestochka bezopasnosti po **NIST 800-53 rev5 High** (farmacia ready):
+* Detects macOS version and selects the appropriate baseline.
+* Installs the MDM enrollment profile (if URL/file provided).
+* Installs all baseline `.mobileconfig` profiles.
+* Hardens the device per **NIST 800‑53 rev5 High** intent (pharmacy‑ready):
 
   * Firewall on
   * Gatekeeper on
-  * Parol 12+ char, mixed, cifra, simvol
+  * Password policy: 12+ chars with mixed case, digit, symbol
   * FileVault defer
-* Pishut’sya logi, vivod profil id.
-* Mozhet kinut Slack notif.
+* Writes detailed logs and outputs installed profile identifiers.
+* Optionally sends a Slack notification.
 
 ---
 
 ## Hooks
 
-* `hooks/prebaseline.d/*.sh` — do install baseline.
-* `hooks/postbaseline.d/*.sh` — posle install baseline.
-* `hooks/unenroll.d/*.sh` — pri uninstall.
+* `hooks/prebaseline.d/*.sh` — run **before** installing the baseline.
+* `hooks/postbaseline.d/*.sh` — run **after** installing the baseline.
+* `hooks/unenroll.d/*.sh` — run during uninstall/unenroll.
 
 ---
 
@@ -121,29 +148,41 @@ sudo -E ./bootstrap.sh
 sudo ./uninstall.sh
 ```
 
-* snimaet profili kotorie stavil
-* probuet snimat enroll profil
-* gonyaet `unenroll.d/*.sh`
+* Removes the profiles this project installed.
+* Attempts to remove the Jamf Now enrollment profile.
+* Executes `unenroll.d/*.sh` hooks.
 
 ---
 
-## Ogranicheniya
+## Limitations
 
-* Jamf Now enrollment vsyo ravno sprosit user code.
-* Tolko macOS, nichego dlya Windows/Linux.
-* Zero-touch tolko cherez Jamf Pro.
+* Jamf Now enrollment will still prompt the **user code**.
+* macOS only; nothing for Windows/Linux.
+* True zero‑touch requires Jamf Pro + DEP/ABM.
 
 ---
 
 ## FAQ
 
-**Gde vzyat URL?** — v Jamf Now Open Enrollment page.
+**Where do I get the enrollment URL?**  From your Jamf Now **Open Enrollment** page. The URL must point directly to a `.mobileconfig` file, not an HTML page. If you receive HTML instead of a profile, download the profile manually from Jamf Now and use `ENROLL_PROFILE_FILE`.
 
-**Nado li menyat dlya raznyh macOS?** — net, skript sam vyberet.
+**Do I need to change anything for different macOS versions?**  No. The script auto‑selects the correct baseline folder.
 
-**Mogu li dodelat EDR/VPN agent?** — da, kladi v postbaseline hook.
+**Can I add my EDR/VPN agent?**  Yes. Drop installers or scripts into the **postbaseline** hook.
 
-**Gde smotret chto bylo?** — v `/var/log/mdm-onboard.log`.
+**Where are the logs?**  `/var/log/mdm-onboard.log`.
+
+**Why don’t profiles install automatically?**  Starting with macOS 13, the `profiles` CLI cannot perform silent installs. The script opens the profile in **System Settings** for a manual user confirmation.
+
+**Do I really need the Jamf Now link?**  Typically yes, but you can also enroll by using a **downloaded .mobileconfig** file from your Jamf Now console (`ENROLL_PROFILE_FILE`).
+
+---
+
+## Screenshot
+
+If your repo contains a `static/result.png`, GitHub will render it below. This is handy to signal a successful dry‑run or to show expected output:
+
+![Bootstrap result](./static/result.png)
 
 ---
 

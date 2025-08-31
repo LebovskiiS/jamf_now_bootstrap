@@ -109,11 +109,36 @@ log "Baseline dir:  ${BASELINE_DIR}"
 # -------------------------
 install_profile() {
   local file="$1"
-  # Try modern syntax first (Ventura+), fallback to legacy
-  if /usr/bin/profiles help 2>&1 | grep -q "install -type"; then
-    /usr/bin/profiles install -type configuration -path "$file"
+  
+  # Check if we're on macOS 13+ where profiles command is deprecated
+  if [[ "$major" -ge 13 ]]; then
+    log "macOS 13+ detected - using System Settings for profile installation"
+    log "Please install the profile manually:"
+    log "1. Open System Settings > Privacy & Security > Profiles"
+    log "2. Click the profile file: $file"
+    log "3. Follow the installation prompts"
+    
+    # Open the profile file in Finder
+    open "$file"
+    
+    # Wait for user to install
+    read -p "Press Enter after you have installed the profile in System Settings..."
+    
+    # Verify installation by checking if the profile is listed
+    if /usr/bin/profiles list -type configuration 2>/dev/null | grep -q "$(basename "$file")"; then
+      log "Profile installation verified"
+      return 0
+    else
+      log "WARNING: Profile may not be installed. Please check System Settings > Profiles"
+      return 1
+    fi
   else
-    /usr/bin/profiles -I -F "$file"
+    # Legacy method for older macOS versions
+    if /usr/bin/profiles help 2>&1 | grep -q "install -type"; then
+      /usr/bin/profiles install -type configuration -path "$file"
+    else
+      /usr/bin/profiles -I -F "$file"
+    fi
   fi
 }
 
@@ -129,7 +154,18 @@ list_installed_identifiers() {
 if [[ -n "${ENROLL_URL:-}" ]]; then
   tmp="/tmp/enroll.mobileconfig"
   log "Downloading MDM enrollment profile from: ${ENROLL_URL}"
-  /usr/bin/curl -fsSL -o "$tmp" "$ENROLL_URL"
+  /usr/bin/curl -fsSL -H "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36" -H "Accept: application/x-apple-aspen-config" -o "$tmp" "$ENROLL_URL"
+  
+  # Verify that we got a mobileconfig file, not HTML
+  if head -1 "$tmp" | grep -q "<?xml"; then
+    log "Valid mobileconfig file downloaded"
+  else
+    log "ERROR: Downloaded file is not a valid mobileconfig (got HTML instead)"
+    log "Please check the enrollment URL or download the profile manually from Jamf Now"
+    log "The URL should point directly to a .mobileconfig file, not a web page"
+    exit 1
+  fi
+  
   log "Installing MDM enrollment profile..."
   install_profile "$tmp" || { log "ERROR: failed to install enrollment profile"; exit 1; }
   echo "$tmp" >> "$STATE_PROFILES"

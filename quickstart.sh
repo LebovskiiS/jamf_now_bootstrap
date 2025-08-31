@@ -47,7 +47,7 @@ case "$CHOICE" in
   *) echo "Unknown choice '${CHOICE}', falling back to '${detected}'"; CHOICE="$detected" ;;
 esac
 
-BASELINE_DIR="mofileconfigs/macos/${CHOICE}"
+BASELINE_DIR="mobileconfigs/macos/${CHOICE}"
 if [[ ! -d "$BASELINE_DIR" ]]; then
   echo "ERROR: Baseline directory not found: ${BASELINE_DIR}" >&2
   echo "Make sure your .mobileconfig files exist under: ${BASELINE_DIR}" >&2
